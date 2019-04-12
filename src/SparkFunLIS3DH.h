@@ -1,6 +1,6 @@
 /******************************************************************************
  * TODO - Redo documentation
- * 
+ *
 SparkFunLIS3DSH.h
 LIS3DSH Arduino and Teensy Driver
 
@@ -20,146 +20,127 @@ Teensy loader 1.23
 
 This code is released under the [MIT License](http://opensource.org/licenses/MIT).
 
-Please review the LICENSE.md file included with this example. If you have any questions 
+Please review the LICENSE.md file included with this example. If you have any questions
 or concerns with licensing, please contact techsupport@sparkfun.com.
 
 Distributed as-is; no warranty is given.
 ******************************************************************************/
 
-#ifndef __LIS3DSH_IMU_H__
-#define __LIS3DSH_IMU_H__
+#ifndef LIS3DSH_H
+#define LIS3DSH_H
 
-#include "stdint.h"
-
-//values for commInterface
 #define I2C_MODE 0
 #define SPI_MODE 1
 
-// Return values
-typedef enum
-{
-	IMU_SUCCESS,
-	IMU_HW_ERROR,
-	IMU_NOT_SUPPORTED,
-	IMU_GENERIC_ERROR,
-	IMU_OUT_OF_BOUNDS,
-	IMU_ALL_ONES_WARNING,
-	//...
+const uint8_t DEFAULT_I2C_ADDRESS = 0x3C;
+const uint8_t WHO_AM_I_ID = 0b111111;
+
+typedef enum RETURN_CODES {
+    IMU_SUCCESS = 0,
+    IMU_HW_ERROR = 1,
+    IMU_NOT_SUPPORTED = 2,
+    IMU_GENERIC_ERROR = 3,
+    IMU_OUT_OF_BOUNDS = 4,
+    IMU_ALL_ONES_WARNING = 5,
 } status_t;
 
-enum LIS3DSH_FIFO_MODES
-{
-	LIS3DSH_FIFO_DISABLED = 1,
-	LIS3DSH_FIFO_MODE = 2,
-	LIS3DSH_FIFO_STREAM = 3,
-	LIS3DSH_FIFO_TRIGGER = 4,
-}
-
-//This is the core operational class of the driver.
-//  LIS3SDHCore contains only read and write operations towards the IMU.
-//  To use the higher level functions, use the class LIS3DSH which inherits
-//  this class.
-
-class LIS3DSHCore
-{
-  public:
-	LIS3SDHCore(uint8_t);
-	LIS3SDHCore(uint8_t, uint8_t);
-	~LIS3SDHCore() = default;
-
-	status_t beginCore(void);
-
-	//The following utilities read and write to the IMU
-
-	//ReadRegisterRegion takes a uint8 array address as input and reads
-	//  a chunk of memory into that array.
-	status_t readRegisterRegion(uint8_t *, uint8_t, uint8_t);
-
-	//readRegister reads one 8-bit register
-	status_t readRegister(uint8_t *, uint8_t);
-
-	//Reads two 8-bit regs, LSByte then MSByte order, and concatenates them.
-	//  Acts as a 16-bit read operation
-	status_t readRegisterInt16(int16_t *, uint8_t offset);
-
-	//Writes an 8-bit byte;
-	status_t writeRegister(uint8_t, uint8_t);
-
-  private:
-	//Communication stuff
-	uint8_t commInterface;
-	uint8_t I2CAddress;
-	uint8_t chipSelectPin;
+enum LIS3DSH_FIFO_MODES {
+    LIS3DSH_FIFO_BYPASS = 0b000,
+    LIS3DSH_FIFO_MODE = 0b001,
+    LIS3DSH_FIFO_STREAM = 0b010,
+    LIS3DSH_FIFO_STREAM_TO_FIFO = 0b011,
+    LIS3DSH_FIFO_BYPASS_TO_STREAM = 0b100,
+    LIS3DSH_FIFO_BYPASS_TO_FIFO = 0b111,
 };
 
-//This struct holds the settings the driver uses to do calculations
-struct SensorSettings
-{
-  public:
-	//Accelerometer settings
-	uint16_t sample_rate;		 //Hz.  Can be: 0,1,10,25,50,100,200,400,1600 Hz
-	uint8_t accelerometer_range; //Max G force readable.  Can be: 2, 4, 8, 16
+enum LIS3DSH_INTERRUPT_POLARITY {
+    LIS3DSH_ACTIVE_LOW = 0,
+    LIS3DSH_ACTIVE_HIGH = 1,
 
-	uint8_t accelerometer_x_enabled = true;
-	uint8_t accelerometer_y_enabled = true;
-	uint8_t accelerometer_z_enabled = true;
-
-	//Fifo settings
-	uint8_t fifo_enabled;
-	uint8_t fifo_mode;
-	uint8_t fifo_watermark;
-
-	uint8_t interrupt_polarity;
-	uint8_t interrupt_latching;
-
-	uint8_t inactivity_sleep_enabled;
-	uint8_t inactivity_threshold;
-	uint8_t inactivity_time;
-	uint8_t wake_threshold;
 };
 
-//This is the highest level class of the driver.
-//
-//  class LIS3DSH inherits the core and makes use of the beginCore()
-//method through it's own begin() method.  It also contains the
-//settings struct to hold user settings.
+enum LIS3DSH_INTERRUPT_LATCH {
+    LIS3DSH_INTERUPT_LATCHED = 0,
+    LIS3DSH_INTERUPT_PULSED = 1,
+};
 
-class LIS3DSH : public LIS3SDHCore
-{
-  public:
-	SensorSettings settings;
+struct SensorSettings {
+    // Accelerometer settings
+    uint8_t accelerometer_range;  // Max G force readable. [2, 4, 8, 16]
 
-	//Error checking
-	uint16_t allOnesCounter;
-	uint16_t nonSuccessCounter;
+    uint16_t aa_filter_bandwidth;  // Hz. [50, 200, 400, 800]
+    uint16_t sample_rate;          // Hz. [0 (off), 3, 6, 12, 25, 50, 100, 400, 800, 1600]
+    uint8_t accelerometer_x_enabled;
+    uint8_t accelerometer_y_enabled;
+    uint8_t accelerometer_z_enabled;
 
-	LIS3DSH(uint8_t busType = I2C_MODE, uint8_t inputArg = 0x19);
+    // Fifo settings
+    uint8_t fifo_enabled;
+    uint8_t fifo_mode;
+    uint8_t fifo_watermark;
+    uint8_t fifo_watermark_interrupt_enabled;
 
-	status_t begin(void);
-	void apply_settings(void);
+    uint8_t interrupt_polarity;
+    uint8_t interrupt_latching;
 
-	void power_down(void);
+    uint8_t inactivity_sleep_enabled;
+    uint8_t inactivity_threshold;
+    uint8_t inactivity_time;
+    uint8_t wake_threshold;
 
-	int8_t read_temperature(void);
-	void read_accelerometers(uint16_t *readings);
+    uint8_t block_data_update;
 
-	//Returns the raw bits from the sensor cast as 16-bit signed integers
-	int16_t readRawAccelX(void);
-	int16_t readRawAccelY(void);
-	int16_t readRawAccelZ(void);
+    uint8_t interrupt_2_enabled;
+};
 
-	//Returns the values as floats.  Inside, this calls readRaw___();
-	float readFloatAccelX(void);
-	float readFloatAccelY(void);
-	float readFloatAccelZ(void);
+typedef struct AccelerometerEntry {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+};
 
-	//FIFO stuff
-	uint8_t read_fifo(uint8_t *buffer);
-	uint8_t get_fifo_count();
+///////////////////////////////////////////////////////////////////////////////
+// LIS3DSH Class
 
-	float calcAccel(int16_t);
+class LIS3DSH {
+   public:
+    LIS3DSH(uint8_t comm_mode = I2C_MODE, uint8_t address_or_cs = DEFAULT_I2C_ADDRESS);
+    status_t begin(void);
+    status_t read(uint8_t *output, uint8_t address);
+    status_t burst_read(uint8_t *output, uint8_t address, uint8_t length);
+    status_t read_16(int16_t *output, uint8_t address);
+    status_t write(uint8_t input, uint8_t address);
+    status_t write_bit(uint8_t input, uint8_t address, uint8_t bit);
 
-  private:
+    void apply_settings();
+    void power_down();
+    void measurement_mode();
+
+    uint8_t read_fifo_buffer(uint8_t *buffer);
+    uint8_t read_fifo_buffer(AccelerometerEntry *buffer);
+    uint8_t get_fifo_count();
+    uint8_t has_fifo_overrun();
+
+    int8_t read_temperature(void);
+    void read_accelerometers(uint16_t *readings);
+    float calculate_acceleration_from_raw(int16_t);
+
+    // Error checking
+    SensorSettings settings;
+    uint16_t allOnesCounter;
+    uint16_t nonSuccessCounter;
+
+   private:
+    status_t begin_comms();
+    void set_sample_rate();
+    void set_range_and_aa();
+    void configure_fifo();
+    void configure_interrupts();
+
+    // Communication stuff
+    uint8_t comm_type;
+    uint8_t i2c_address;
+    uint8_t chip_select_pin;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -232,23 +213,23 @@ class LIS3DSH : public LIS3SDHCore
 #define LIS3DSH_ST1_1 0x40
 #define LIS3DSH_TIM4_1 0x50
 #define LIS3DSH_TIM3_1 0x51
-#define LIS3DSH_TIM2_1 0x52 //16-bit, Low byte first
-#define LIS3DSH_TIM1_1 0x54 //16-bit, Low byte first
+#define LIS3DSH_TIM2_1 0x52  // 16-bit, Low byte first
+#define LIS3DSH_TIM1_1 0x54  // 16-bit, Low byte first
 #define LIS3DSH_THRS2_1 0x56
 #define LIS3DSH_THRS1_1 0x57
 #define LIS3DSH_MASK1_B 0x59
 #define LIS3DSH_MASK1_A 0x5A
 #define LIS3DSH_SETT1 0x5B
 #define LIS3DSH_PR1 0x5C
-#define LIS3DSH_TC1 0x5D   //16-bit, Low byte first
-#define LIS3DSH_OUTS1 0x5F //16-bit, Low byte first
+#define LIS3DSH_TC1 0x5D    // 16-bit, Low byte first
+#define LIS3DSH_OUTS1 0x5F  // 16-bit, Low byte first
 
 // State Machine 2 registers
-#define LIS3DSH_ST2_1 0x60 // ST2_1 (60) ~ ST2_16 (6F)
+#define LIS3DSH_ST2_1 0x60  // ST2_1 (60) ~ ST2_16 (6F)
 #define LIS3DSH_TIM4_2 0x70
 #define LIS3DSH_TIM3_2 0x71
-#define LIS3DSH_TIM2_2 0x72 //16-bit, Low byte first
-#define LIS3DSH_TIM1_2 0x74 //16-bit, Low byte first
+#define LIS3DSH_TIM2_2 0x72  // 16-bit, Low byte first
+#define LIS3DSH_TIM1_2 0x74  // 16-bit, Low byte first
 #define LIS3DSH_THRS2_2 0x76
 #define LIS3DSH_THRS1_2 0x77
 #define LIS3DSH_DES2 0x78
@@ -256,7 +237,59 @@ class LIS3DSH : public LIS3SDHCore
 #define LIS3DSH_MASK1_2 0x7A
 #define LIS3DSH_SETT2 0x7B
 #define LIS3DSH_PR2 0x7C
-#define LIS3DSH_TC2 0x7D   //16-bit, Low byte first
-#define LIS3DSH_OUTS2 0x7F //16-bit, Low byte first
+#define LIS3DSH_TC2 0x7D    // 16-bit, Low byte first
+#define LIS3DSH_OUTS2 0x7F  // 16-bit, Low byte first
+
+///////////////////////////////////////////////////////////////////////////////
+// State Machine opcodes and commands
+
+// Operations
+#define LIS3DS_NOP 0x0
+#define LIS3DS_TI1 0x1
+#define LIS3DS_TI2 0x2
+#define LIS3DS_TI3 0x3
+#define LIS3DS_TI4 0x4
+#define LIS3DS_GNTH1 0x5
+#define LIS3DS_GNTH2 0x6
+#define LIS3DS_LNTH1 0x7
+#define LIS3DS_LNTH2 0x8
+#define LIS3DS_GTTH1 0x9
+#define LIS3DS_LLTH2 0xA
+#define LIS3DS_GRTH1 0xB
+#define LIS3DS_LRTH1 0xC
+#define LIS3DS_GRTH2 0xD
+#define LIS3DS_LRTH2 0xE
+#define LIS3DS_NZERO 0xF
+
+// Commands
+
+#define LIS3DS_STOP 0x00
+#define LIS3DS_CONT 0x11
+#define LIS3DS_JMP 0x22
+#define LIS3DS_SRP 0x33
+#define LIS3DS_CRP 0x44
+#define LIS3DS_SETP 0x55
+#define LIS3DS_SETS1 0x66
+#define LIS3DS_STHR1 0x77
+#define LIS3DS_OUTC 0x88
+#define LIS3DS_OUTW 0x99
+#define LIS3DS_STHR2 0xAA
+#define LIS3DS_DEC 0xBB
+#define LIS3DS_SISW 0xCC
+#define LIS3DS_REL 0xDD
+#define LIS3DS_STHR3 0xEE
+#define LIS3DS_SSYNC 0xFF
+#define LIS3DS_SABS0 0x12
+#define LIS3DS_SABS1 0x13
+#define LIS3DS_SELMA 0x14
+#define LIS3DS_SRADI0 0x21
+#define LIS3DS_SRADI1 0x23
+#define LIS3DS_SELSA 0x24
+#define LIS3DS_SCS0 0x31
+#define LIS3DS_SCS1 0x32
+#define LIS3DS_SRTAM0 0x34
+#define LIS3DS_STIM3 0x41
+#define LIS3DS_STIM4 0x42
+#define LIS3DS_SRTAM1 0x43
 
 #endif
