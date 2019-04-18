@@ -101,9 +101,6 @@ status_t LIS3DSH::begin_comms() {
 
 #endif
     }
-
-    delay(2);
-    return comms_check();
 }
 
 /**
@@ -167,7 +164,6 @@ status_t LIS3DSH::read_from(uint8_t *output, uint8_t address, uint8_t length) {
 status_t LIS3DSH::i2c_read(uint8_t *output, uint8_t address, uint8_t length) {
     status_t result = IMU_SUCCESS;
     Wire.beginTransmission(i2c_address);
-    address |= 0x80;  // turn auto-increment bit on, bit 7 for I2C
     Wire.write(address);
     if (Wire.endTransmission() != 0)
         result = IMU_HW_ERROR;
@@ -177,9 +173,7 @@ status_t LIS3DSH::i2c_read(uint8_t *output, uint8_t address, uint8_t length) {
         Wire.requestFrom(i2c_address, length);
         for (size_t i = 0; (i < length) and Wire.available(); i++) {
             uint8_t c = Wire.read();
-            *output = c;
-            output++;
-            i++;
+            output[i] = c;
         }
     }
     return result;
@@ -464,6 +458,8 @@ void LIS3DSH::apply_state_machine_settings() {
  * @param sm_number: State machine to be configured.
  */
 void LIS3DSH::configure_state_machine(uint8_t sm_number) {
+    write_state_machine_status(sm_number, false);
+
     uint8_t offset = 0;
     if (sm_number == SM2) offset = 0x20;
 
@@ -490,11 +486,11 @@ void LIS3DSH::configure_state_machine(uint8_t sm_number) {
     // Timers
     uint8_t timer[2] = {lowByte(sm_settings[sm_number].timer1_initial_value),
                         highByte(sm_settings[sm_number].timer1_initial_value)};
-    write_to(timer, LIS3DSH_REG_TIM1_1 + offset, 2);
+    write_to((uint8_t *)&sm_settings[sm_number].timer1_initial_value, LIS3DSH_REG_TIM1_1 + offset, 2);
 
     timer[0] = lowByte(sm_settings[sm_number].timer2_initial_value);
     timer[1] = highByte(sm_settings[sm_number].timer2_initial_value);
-    write_to(timer, LIS3DSH_REG_TIM2_1 + offset + 1);
+    write_to(timer, LIS3DSH_REG_TIM2_1 + offset, 2);
 
     write_to(&sm_settings[sm_number].timer3_initial_value, LIS3DSH_REG_TIM3_1 + offset);
     write_to(&sm_settings[sm_number].timer4_initial_value, LIS3DSH_REG_TIM4_1 + offset);
@@ -537,6 +533,14 @@ void LIS3DSH::power_down() {
  */
 void LIS3DSH::measurement_mode() { set_sample_rate(); }
 
+/**
+ * Reboot the device.
+ * Might take a little while?
+ */
+void LIS3DSH::reboot() {
+    uint8_t boot = 0x80;
+    write_to(&boot, LIS3DSH_CTRL_REG6);
+}
 ///////////////////////////////////////////////////////////////////////////////
 // Outputs
 
@@ -570,7 +574,7 @@ float LIS3DSH::calculate_acceleration_from_raw(int16_t input) {
  *
  * @param readings: 3xInt buffer to store readings into (X,Y,Z).
  */
-void LIS3DSH::read_accelerometers(uint16_t *readings) {
+void LIS3DSH::read_accelerometers(int16_t *readings) {
     uint8_t data[6];
     read_from(data, LIS3DSH_REG_X_L, 6);
 
@@ -587,7 +591,7 @@ void LIS3DSH::read_accelerometers(uint16_t *readings) {
  * @param entry: Accelerometer entry object to store the measurements.
  */
 void LIS3DSH::read_accelerometers(AccelerometerEntry *entry) {
-    uint16_t data[3];
+    int16_t data[3];
     read_accelerometers(data);
     entry->x = data[0];
     entry->y = data[1];
@@ -608,6 +612,7 @@ void LIS3DSH::read_accelerometers(AccelerometerEntry *entry) {
  */
 uint8_t LIS3DSH::read_fifo_buffer(uint8_t *output_buffer) {
     uint8_t entries_to_read = get_fifo_count();
+
     if (entries_to_read > 0) {
         uint8_t bytes_to_read = constrain(entries_to_read * 6, 0, 192);
         read_from(output_buffer, LIS3DSH_REG_X_L, bytes_to_read);
@@ -676,7 +681,7 @@ void LIS3DSH::set_state_machine_instruction(uint8_t sm_number, uint8_t code_regi
 
     // Calculate the correct register address
     uint8_t register_address = LIS3DSH_REG_ST1_1;
-    if (sm_number == 2) {
+    if (sm_number == SM2) {
         register_address = LIS3DSH_REG_ST2_1;
     }
     register_address += (code_register_id - 1);
@@ -725,9 +730,15 @@ void LIS3DSH::configure_auto_sleep() {
 
     StateMachineSettings sleep_settings;
 
-    sleep_settings.threshold_1 = 4;  // Wake threshold
+    sleep_settings.decimator = 0;
+    sleep_settings.threshold_1 = 5;  // Wake threshold
     sleep_settings.threshold_2 = 2;  // Sleep threshold
+    sleep_settings.thresholds_are_absolute = true;
+    sleep_settings.diff_calculation_enabled = true;
+    sleep_settings.stop_and_cont_interrupts = true;
+    sleep_settings.interrupt_output = true;
 
+    sleep_settings.timer2_initial_value = 2 * settings.sample_rate;
     sleep_settings.mask_a = 0b11111100;
     sleep_settings.mask_b = 0b11111100;
 
@@ -750,18 +761,33 @@ void LIS3DSH::configure_auto_sleep() {
      */
 
     // Inactive state
-    sleep_settings.code[0] = LIS3DSH_OP_NOP << 4 | LIS3DSH_OP_GTTH1;  // Wait until wake threshold triggered
+    sleep_settings.code[0] = (LIS3DSH_OP_NOP << 4) | LIS3DSH_OP_GNTH1;  // Wait until wake threshold triggered
 
     // Active state
     sleep_settings.code[1] = LIS3DSH_COMMAND_SRP;   // Set the new reset loop point to make an active loop
     sleep_settings.code[2] = LIS3DSH_COMMAND_OUTC;  // Set INT2 high for FIFO purposes
-    sleep_settings.code[3] = LIS3DSH_OP_GNTH2 << 4 | LIS3DSH_OP_LNTH2;  // Reset while activity continues
+
+    sleep_settings.code[3] = (LIS3DSH_OP_GNTH2 << 4) | LIS3DSH_OP_LNTH2;  // Reset while activity continues
 
     // Pre-sleep state
     sleep_settings.code[4] = LIS3DSH_COMMAND_CRP;  // Remove the reset loop
-    // INT2 stays high when the final state is reached, so FIFO will continue to record
-    sleep_settings.code[5] = LIS3DSH_OP_TI1 << 4 | LIS3DSH_OP_NOP;  // Reset once timer reaches minimum reads
 
-    sm_settings[1] = sleep_settings;
+    // INT2 stays high when the final state is reached, so FIFO will continue to record
+    sleep_settings.code[5] = LIS3DSH_OP_TI2 << 4 | LIS3DSH_OP_NOP;  // Reset once timer reaches minimum reads
+
+    sm_settings[SM2] = sleep_settings;
     apply_state_machine_settings();
+}
+
+/**
+ * Get the active state of the specified state machine
+ * @return: Pointer address of the active state [0-15]
+ */
+uint8_t LIS3DSH::get_state(uint8_t sm_number) {
+    uint8_t state;
+    uint8_t register_address = LIS3DSH_REG_PR1;
+    if (sm_number == SM2) register_address = LIS3DSH_REG_PR2;
+
+    read_from(&state, register_address);
+    return (state & 0x0F);
 }

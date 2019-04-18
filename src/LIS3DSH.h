@@ -45,24 +45,24 @@ typedef enum RETURN_CODES {
     IMU_ALL_ONES_WARNING = 5,
 } status_t;
 
-enum LIS3DSH_FIFO_MODES {
-    LIS3DSH_FIFO_BYPASS = 0b000,
-    LIS3DSH_FIFO_MODE = 0b001,
-    LIS3DSH_FIFO_STREAM = 0b010,
-    LIS3DSH_FIFO_STREAM_TO_FIFO = 0b011,
-    LIS3DSH_FIFO_BYPASS_TO_STREAM = 0b100,
-    LIS3DSH_FIFO_BYPASS_TO_FIFO = 0b111,
+enum LIS3DSH_FIFO_MODE {
+    BYPASS = 0b000,
+    FIFO = 0b001,
+    STREAM = 0b010,
+    STREAM_TO_FIFO = 0b011,
+    BYPASS_TO_STREAM = 0b100,
+    BYPASS_TO_FIFO = 0b111,
 };
 
 enum LIS3DSH_INTERRUPT_POLARITY {
-    LIS3DSH_ACTIVE_LOW = 0,
-    LIS3DSH_ACTIVE_HIGH = 1,
+    ACTIVE_LOW = 0,
+    ACTIVE_HIGH = 1,
 
 };
 
-enum {
-    LIS3DSH_INTERRUPT_LATCHED = 0,
-    LIS3DSH_INTERRUPT_PULSED = 1,
+enum LIS3DSH_INTERRUPT_MODE {
+    LATCHED = 0,
+    PULSED = 1,
 };
 
 enum STATE_MACHINES {
@@ -70,7 +70,7 @@ enum STATE_MACHINES {
     SM2 = 1,
 };
 
-typedef struct SensorSettings {
+struct SensorSettings {
     // Accelerometer settings
     uint8_t accelerometer_range = 2;  // Max G force readable. [2, 4, 8, 16]
 
@@ -82,13 +82,13 @@ typedef struct SensorSettings {
 
     // Fifo settings
     uint8_t fifo_enabled = false;
-    uint8_t fifo_mode = LIS3DSH_FIFO_BYPASS;
+    uint8_t fifo_mode = LIS3DSH_FIFO_MODE::BYPASS;
     uint8_t fifo_watermark = 0;
     uint8_t fifo_watermark_interrupt_enabled = false;
 
     // Interrupt settings
-    uint8_t interrupt_polarity = LIS3DSH_ACTIVE_LOW;
-    uint8_t interrupt_latching = LIS3DSH_INTERRUPT_LATCHED;
+    uint8_t interrupt_polarity = LIS3DSH_INTERRUPT_POLARITY::ACTIVE_LOW;
+    uint8_t interrupt_latching = LIS3DSH_INTERRUPT_MODE::LATCHED;
     uint8_t interrupt_1_enabled = false;
     uint8_t interrupt_2_enabled = false;
     uint8_t data_ready_interrupt_enabled;
@@ -140,6 +140,7 @@ class LIS3DSH {
     void power_down();
     void measurement_mode();
     void apply_state_machine_settings();
+    void reboot();
 
     // Comms
     status_t read_from(uint8_t *output, uint8_t address, uint8_t length = 1);
@@ -150,7 +151,7 @@ class LIS3DSH {
     // Ouputs
     int8_t read_temperature(void);
     float calculate_acceleration_from_raw(int16_t);
-    void read_accelerometers(uint16_t *readings);
+    void read_accelerometers(int16_t *readings);
     void read_accelerometers(AccelerometerEntry *entry);
 
     // FIFO
@@ -165,6 +166,7 @@ class LIS3DSH {
                                        uint8_t next_instruction);
     void write_state_machine_status(uint8_t sm_number, uint8_t active_status);
     void configure_auto_sleep();
+    uint8_t get_state(uint8_t sm_number);
 
     // Settings
     SensorSettings settings;
