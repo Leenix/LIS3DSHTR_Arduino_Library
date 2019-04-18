@@ -36,8 +36,7 @@ Distributed as-is; no warranty is given.
 const uint8_t DEFAULT_I2C_ADDRESS = 0x1E;
 const uint8_t WHO_AM_I_ID = 0b111111;
 
-typedef enum RETURN_CODES
-{
+typedef enum RETURN_CODES {
     IMU_HW_ERROR = 0,
     IMU_SUCCESS = 1,
     IMU_NOT_SUPPORTED = 2,
@@ -46,8 +45,7 @@ typedef enum RETURN_CODES
     IMU_ALL_ONES_WARNING = 5,
 } status_t;
 
-enum LIS3DSH_FIFO_MODES
-{
+enum LIS3DSH_FIFO_MODES {
     LIS3DSH_FIFO_BYPASS = 0b000,
     LIS3DSH_FIFO_MODE = 0b001,
     LIS3DSH_FIFO_STREAM = 0b010,
@@ -56,32 +54,28 @@ enum LIS3DSH_FIFO_MODES
     LIS3DSH_FIFO_BYPASS_TO_FIFO = 0b111,
 };
 
-enum LIS3DSH_INTERRUPT_POLARITY
-{
+enum LIS3DSH_INTERRUPT_POLARITY {
     LIS3DSH_ACTIVE_LOW = 0,
     LIS3DSH_ACTIVE_HIGH = 1,
 
 };
 
-enum
-{
+enum {
     LIS3DSH_INTERRUPT_LATCHED = 0,
     LIS3DSH_INTERRUPT_PULSED = 1,
 };
 
-enum STATE_MACHINES
-{
+enum STATE_MACHINES {
     SM1 = 0,
     SM2 = 1,
 };
 
-typedef struct SensorSettings
-{
+typedef struct SensorSettings {
     // Accelerometer settings
-    uint8_t accelerometer_range = 2; // Max G force readable. [2, 4, 8, 16]
+    uint8_t accelerometer_range = 2;  // Max G force readable. [2, 4, 8, 16]
 
-    uint16_t aa_filter_bandwidth = 800; // Hz. [50, 200, 400, 800]
-    uint16_t sample_rate = 0;           // Hz. [0 (off), 3, 6, 12, 25, 50, 100, 400, 800, 1600]
+    uint16_t aa_filter_bandwidth = 800;  // Hz. [50, 200, 400, 800]
+    uint16_t sample_rate = 0;            // Hz. [0 (off), 3, 6, 12, 25, 50, 100, 400, 800, 1600]
     uint8_t accelerometer_x_enabled = true;
     uint8_t accelerometer_y_enabled = true;
     uint8_t accelerometer_z_enabled = true;
@@ -105,8 +99,7 @@ typedef struct SensorSettings
     uint8_t state_machine_2_enabled = false;
 };
 
-struct StateMachineSettings
-{
+struct StateMachineSettings {
     uint8_t hysteresis;
     uint8_t interrupt_output;
 
@@ -128,8 +121,7 @@ struct StateMachineSettings
     uint8_t diff_from_constants_enabled;
 };
 
-struct AccelerometerEntry
-{
+struct AccelerometerEntry {
     int16_t x;
     int16_t y;
     int16_t z;
@@ -138,9 +130,8 @@ struct AccelerometerEntry
 ///////////////////////////////////////////////////////////////////////////////
 // LIS3DSH Class
 
-class LIS3DSH
-{
-public:
+class LIS3DSH {
+   public:
     LIS3DSH(uint8_t comm_mode = I2C_MODE, uint8_t address_or_cs = DEFAULT_I2C_ADDRESS);
 
     // Config
@@ -149,7 +140,6 @@ public:
     void power_down();
     void measurement_mode();
     void apply_state_machine_settings();
-    void configure_auto_sleep();
 
     // Comms
     status_t read_from(uint8_t *output, uint8_t address, uint8_t length = 1);
@@ -159,9 +149,9 @@ public:
 
     // Ouputs
     int8_t read_temperature(void);
+    float calculate_acceleration_from_raw(int16_t);
     void read_accelerometers(uint16_t *readings);
     void read_accelerometers(AccelerometerEntry *entry);
-    float calculate_acceleration_from_raw(int16_t);
 
     // FIFO
     uint8_t read_fifo_buffer(uint8_t *buffer);
@@ -171,14 +161,16 @@ public:
 
     // State machines
     void set_state_machine_instruction(uint8_t sm_number, uint8_t code_register_id, uint8_t instruction);
-    void set_state_machine_instruction(uint8_t sm_number, uint8_t code_register_id, uint8_t reset_instruction, uint8_t next_instruction);
+    void set_state_machine_instruction(uint8_t sm_number, uint8_t code_register_id, uint8_t reset_instruction,
+                                       uint8_t next_instruction);
     void write_state_machine_status(uint8_t sm_number, uint8_t active_status);
+    void configure_auto_sleep();
 
     // Settings
     SensorSettings settings;
     StateMachineSettings sm_settings[2];
 
-private:
+   private:
     status_t begin_comms();
     status_t i2c_read(uint8_t *output, uint8_t address, uint8_t length = 1);
     status_t i2c_write(uint8_t *input, uint8_t address, uint8_t length = 1);
@@ -270,23 +262,23 @@ private:
 #define LIS3DSH_REG_ST1_1 0x40
 #define LIS3DSH_REG_TIM4_1 0x50
 #define LIS3DSH_REG_TIM3_1 0x51
-#define LIS3DSH_REG_TIM2_1 0x52 // 16-bit, Low byte first
-#define LIS3DSH_REG_TIM1_1 0x54 // 16-bit, Low byte first
+#define LIS3DSH_REG_TIM2_1 0x52  // 16-bit, Low byte first
+#define LIS3DSH_REG_TIM1_1 0x54  // 16-bit, Low byte first
 #define LIS3DSH_REG_THRS2_1 0x56
 #define LIS3DSH_REG_THRS1_1 0x57
 #define LIS3DSH_REG_MASK1_B 0x59
 #define LIS3DSH_REG_MASK1_A 0x5A
 #define LIS3DSH_REG_SETT1 0x5B
 #define LIS3DSH_REG_PR1 0x5C
-#define LIS3DSH_REG_TC1 0x5D   // 16-bit, Low byte first
-#define LIS3DSH_REG_OUTS1 0x5F // 16-bit, Low byte first
+#define LIS3DSH_REG_TC1 0x5D    // 16-bit, Low byte first
+#define LIS3DSH_REG_OUTS1 0x5F  // 16-bit, Low byte first
 
 // State Machine 2 registers
-#define LIS3DSH_REG_ST2_1 0x60 // ST2_1 (60) ~ ST2_16 (6F)
+#define LIS3DSH_REG_ST2_1 0x60  // ST2_1 (60) ~ ST2_16 (6F)
 #define LIS3DSH_REG_TIM4_2 0x70
 #define LIS3DSH_REG_TIM3_2 0x71
-#define LIS3DSH_REG_TIM2_2 0x72 // 16-bit, Low byte first
-#define LIS3DSH_REG_TIM1_2 0x74 // 16-bit, Low byte first
+#define LIS3DSH_REG_TIM2_2 0x72  // 16-bit, Low byte first
+#define LIS3DSH_REG_TIM1_2 0x74  // 16-bit, Low byte first
 #define LIS3DSH_REG_THRS2_2 0x76
 #define LIS3DSH_REG_THRS1_2 0x77
 #define LIS3DSH_REG_DES2 0x78
@@ -294,8 +286,8 @@ private:
 #define LIS3DSH_REG_MASK2_A 0x7A
 #define LIS3DSH_REG_SETT2 0x7B
 #define LIS3DSH_REG_PR2 0x7C
-#define LIS3DSH_REG_TC2 0x7D   // 16-bit, Low byte first
-#define LIS3DSH_REG_OUTS2 0x7F // 16-bit, Low byte first
+#define LIS3DSH_REG_TC2 0x7D    // 16-bit, Low byte first
+#define LIS3DSH_REG_OUTS2 0x7F  // 16-bit, Low byte first
 
 ///////////////////////////////////////////////////////////////////////////////
 // State Machine opcodes and commands
