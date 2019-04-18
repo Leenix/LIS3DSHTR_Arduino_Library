@@ -63,7 +63,7 @@ status_t LIS3DSH::begin(void)
 
 /**
  * Start up sensor communication.
- * @return: 0 == Success; 1 == Failure to read_from HW ID
+ * @return: 1 == Success; 0 == Failure to read_from HW ID
  */
 status_t LIS3DSH::begin_comms()
 {
@@ -106,12 +106,17 @@ status_t LIS3DSH::begin_comms()
     return comms_check();
 }
 
+/**
+ * Check that communications are working.
+ * The hardware ID register is compared against its known value.
+ * @return: 1 == The read ID matches the expected value, 0 == no match.
+ */
 status_t LIS3DSH::comms_check()
 {
     uint8_t read_check;
     status_t comm_result = IMU_HW_ERROR;
 
-    read_from(&read_check, LIS3DSH_WHO_AM_I);
+    read_from(&read_check, LIS3DSH_REG_WHO_AM_I);
     if (read_check == WHO_AM_I_ID)
     {
         comm_result = IMU_SUCCESS;
@@ -131,155 +136,90 @@ void LIS3DSH::apply_settings(void)
     set_range_and_aa();
     configure_interrupts();
     configure_fifo();
-    configure_state_machines();
+    apply_state_machine_settings();
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Comms
+
 /**
- * Read a the contents of a single register.
- * @param output: Pointer to the output data location.
- * @param address: Register address to read_from from.
- * @return: Success/failure of the read_from operation.
+ * Read data from the device registers.
+ * @param output: The buffer in which to store the read values.
+ * @param address: Register address to read (or starting address in burst reads)
+ * @param length: Number of bytes to read.
  */
-status_t LIS3DSH::read_from(uint8_t *output, uint8_t address)
+status_t LIS3DSH::read_from(uint8_t *output, uint8_t address, uint8_t length)
 {
     uint8_t result;
-    uint8_t num_bytes_to_read = 1;
-    status_t comm_result = IMU_SUCCESS;
+    status_t comm_result;
 
-    switch (comm_type)
+    if (comm_type == SPI_MODE)
     {
-    case I2C_MODE:
-        Wire.beginTransmission(i2c_address);
-        Wire.write(address);
-        Wire.endTransmission();
-
-        Wire.requestFrom(i2c_address, num_bytes_to_read);
-        while (!Wire.available()) // slave may send less than requested
-        {
-            result = Wire.read_from(); // receive a byte as a proper uint8_t
-        }
-        break;
-
-    case SPI_MODE:
-        // take the chip select low to select the device:
-        digitalWrite(chip_select_pin, LOW);
-        // send the device the register you want to read_from:
-        SPI.transfer(address | 0x80); // Ored with "read_from request" bit
-        // send a value of 0 to read_from the first byte returned:
-        result = SPI.transfer(0x00);
-        // take the chip select high to de-select:
-        digitalWrite(chip_select_pin, HIGH);
-
-        if (result == 0xFF)
-        {
-            // we've recieved all ones, report
-            comm_result = IMU_ALL_ONES_WARNING;
-        }
-        break;
-
-    default:
-        break;
+        comm_result = spi_read(output, address, length);
+    }
+    else
+    {
+        comm_result = i2c_read(output, address, length);
     }
 
-    *output = result;
     return comm_result;
 }
 
-/**
- * Read multiple bytes from the device at once.
- * Useful for reading the entire FIFO buffer, among other things.
- * The output buffer must be large enough to contain the number of bytes
- * requested, or an overflow will occur.
- *
- * @param output: Pointer to buffer that will contain the read_from output.
- * @param address: Starting register to read_from data from.
- * @param length: Number of bytes to read_from.
- * @return: Error/success result of read_from.
+/** 
+ * Read a specified number of bytes using the I2C bus.
+ * @param output: The buffer in which to store the read values.
+ * @param address: Register address to read (or starting address in burst reads)
+ * @param length: Number of bytes to read.
  */
-status_t LIS3DSH::burst_read(uint8_t *output, uint8_t address, uint8_t length)
+status_t LIS3DSH::i2c_read(uint8_t *output, uint8_t address, uint8_t length)
 {
-    status_t comm_result = IMU_SUCCESS;
+    status_t result = IMU_SUCCESS;
+    Wire.beginTransmission(i2c_address);
+    address |= 0x80; // turn auto-increment bit on, bit 7 for I2C
+    Wire.write(address);
+    if (Wire.endTransmission() != 0)
+        result = IMU_HW_ERROR;
 
-    // define pointer that will point to the external space
-    uint8_t i = 0;
-    uint8_t c = 0;
-    uint8_t tempFFCounter = 0;
-
-    switch (comm_type)
+    else // OK, all worked, keep going
     {
-    case I2C_MODE:
-        Wire.beginTransmission(i2c_address);
-        address |= 0x80; // turn auto-increment bit on, bit 7 for I2C
-        Wire.write(address);
-        if (Wire.endTransmission() != 0)
+        Wire.requestFrom(i2c_address, length);
+        for (size_t i = 0; (i < length) and Wire.available(); i++)
         {
-            comm_result = IMU_HW_ERROR;
-        }
-
-        else // OK, all worked, keep going
-        {
-            Wire.requestFrom(i2c_address, length);
-            while ((Wire.available()) && (i < length)) // slave may send less than requested
-            {
-                c = Wire.read_from(); // receive a byte as character
-                *output = c;
-                output++;
-                i++;
-            }
-        }
-        break;
-
-    case SPI_MODE:
-        // take the chip select low to select the device:
-        digitalWrite(chip_select_pin, LOW);
-        // send the device the register you want to read_from:
-        SPI.transfer(address | 0x80 | 0x40); // Ored with "read_from request" bit and "auto increment" bit
-        while (i < length)                   // slave may send less than requested
-        {
-            c = SPI.transfer(0x00); // receive a byte as character
-            if (c == 0xFF)
-            {
-                // May have problem
-                tempFFCounter++;
-            }
+            uint8_t c = Wire.read();
             *output = c;
             output++;
             i++;
         }
-        if (tempFFCounter == i)
-        {
-            // Ok, we've recieved all ones, report
-            comm_result = IMU_ALL_ONES_WARNING;
-        }
-        // take the chip select high to de-select:
-        digitalWrite(chip_select_pin, HIGH);
-        break;
-
-    default:
-        break;
     }
-
-    return comm_result;
+    return result;
 }
 
-/**
- * Read a 16-bit value from the device.
- * The data is read_from from two sequential registers and combined.
- * Useful for reading accelerometer values, which are spread across two registers.
- *
- * @param output: Pointer to output variable.
- * @param address: Starting address of register to read_from from.
- * @return: Success/error result of the read_from.
+/** 
+ * Read a specified number of bytes using the SPI bus.
+ * @param output: The buffer in which to store the read values.
+ * @param address: Register address to read (or starting address in burst reads)
+ * @param length: Number of bytes to read.
  */
-status_t LIS3DSH::read_16(int16_t *output, uint8_t address)
+status_t LIS3DSH::spi_read(uint8_t *output, uint8_t address, uint8_t length)
 {
+    status_t result = IMU_SUCCESS;
+    uint8_t num_empty_bytes = 0;
+
+    digitalWrite(chip_select_pin, LOW);
+    SPI.transfer(address | 0x80 | 0x40);
+    for (size_t i = 0; i < length; i++)
     {
-        uint8_t myBuffer[2];
-        status_t comm_result = burst_read(myBuffer, address, 2);
-        int16_t result = (int16_t)myBuffer[0] | int16_t(myBuffer[1] << 8);
-        *output = result;
-        return comm_result;
+        uint8_t c = SPI.transfer(0x00);
+        if (c == 0xFF)
+            num_empty_bytes++;
+        *output = c;
+        output++;
     }
+    if (num_empty_bytes == length)
+        result = IMU_ALL_ONES_WARNING;
+    digitalWrite(chip_select_pin, HIGH);
+
+    return result;
 }
 
 /**
@@ -289,91 +229,64 @@ status_t LIS3DSH::read_16(int16_t *output, uint8_t address)
  * @param address: Address of register to write to.
  * @return: Success/error result of the write.
  */
-status_t LIS3DSH::write(uint8_t input, uint8_t address)
+status_t LIS3DSH::write_to(uint8_t *input, uint8_t address, uint8_t length)
 {
-    status_t comm_result = IMU_SUCCESS;
-    switch (comm_type)
+    uint8_t result;
+    status_t comm_result;
+
+    if (comm_type == SPI_MODE)
     {
-    case I2C_MODE:
-        // Write the byte
-        Wire.beginTransmission(i2c_address);
-        Wire.write(address);
-        Wire.write(input);
-        if (Wire.endTransmission() != 0)
-        {
-            comm_result = IMU_HW_ERROR;
-        }
-        break;
-
-    case SPI_MODE:
-        // take the chip select low to select the device:
-        digitalWrite(chip_select_pin, LOW);
-        // send the device the register you want to read_from:
-        SPI.transfer(address);
-        // send a value of 0 to read_from the first byte returned:
-        SPI.transfer(input);
-        // decrement the number of bytes left to read_from:
-        // take the chip select high to de-select:
-        digitalWrite(chip_select_pin, HIGH);
-        break;
-
-        // No way to check error on this write (Except to read_from back but that's not reliable)
-
-    default:
-        break;
+        comm_result = spi_write(input, address);
+    }
+    else
+    {
+        comm_result = i2c_write(input, address);
     }
 
     return comm_result;
 }
 
 /**
- * Write a value to a register.
+ * Write a value to a register using I2C
  *
  * @param input: Byte to write to the register.
  * @param address: Address of register to write to.
  * @return: Success/error result of the write.
  */
-status_t LIS3DSH::burst_write(uint8_t *input, uint8_t address, uint8_t length)
+status_t LIS3DSH::i2c_write(uint8_t *input, uint8_t address, uint8_t length)
 {
-    status_t comm_result = IMU_SUCCESS;
-    switch (comm_type)
+    status_t result = IMU_SUCCESS;
+    Wire.beginTransmission(i2c_address);
+    Wire.write(address);
+    for (size_t i = 0; i < length; i++)
     {
-    case I2C_MODE:
-        // Write the bytes
-        Wire.beginTransmission(i2c_address);
-        Wire.write(address);
-        for (size_t i = 0; i < length; i++)
-        {
-            Wire.write(input[i]);
-        }
-        if (Wire.endTransmission() != 0)
-        {
-            comm_result = IMU_HW_ERROR;
-        }
-        break;
-
-    case SPI_MODE:
-        // take the chip select low to select the device:
-        digitalWrite(chip_select_pin, LOW);
-        // send the device the register you want to read_from:
-        SPI.transfer(address);
-        // send a value of 0 to read_from the first byte returned:
-        for (size_t i = 0; i < length; i++)
-        {
-            SPI.transfer(input[i]);
-        }
-        // decrement the number of bytes left to read_from:
-        // take the chip select high to de-select:
-        digitalWrite(chip_select_pin, HIGH);
-        break;
-
-        // No way to check error on this write (Except to read_from back but that's not reliable)
-
-    default:
-        break;
+        Wire.write(input[i]);
     }
 
-    return comm_result;
+    if (Wire.endTransmission() != 0)
+    {
+        result = IMU_HW_ERROR;
+    }
+    return result;
+}
+
+/**
+ * Write a value to a register using SPI
+ *
+ * @param input: Byte to write to the register.
+ * @param address: Address of register to write to.
+ * @return: Success/error result of the write.
+ */
+status_t LIS3DSH::spi_write(uint8_t *input, uint8_t address, uint8_t length)
+{
+    digitalWrite(chip_select_pin, LOW);
+    SPI.transfer(address);
+    for (size_t i = 0; i < length; i++)
+    {
+        SPI.transfer(input[i]);
+    }
+    digitalWrite(chip_select_pin, HIGH);
+    return IMU_SUCCESS;
 }
 
 /**
@@ -394,11 +307,17 @@ status_t LIS3DSH::write_bit(uint8_t input, uint8_t address, uint8_t bit)
 
     comm_result = read_from(&current_state, address);
     current_state |= (input << bit);
-    comm_result = write(current_state, address);
+    comm_result = write_to(&current_state, address);
 
     return comm_result;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Config
+
+/**
+ * 
+ */
 void LIS3DSH::set_sample_rate()
 {
     uint8_t input = 0;
@@ -440,7 +359,11 @@ void LIS3DSH::set_sample_rate()
     input |= (settings.accelerometer_x_enabled & 0x01) << 2;
     input |= (settings.accelerometer_y_enabled & 0x01) << 1;
     input |= (settings.accelerometer_z_enabled & 0x01);
+<<<<<<< HEAD
     write(input, LIS3DSH_CTRL_REG4);
+=======
+    write(LIS3DSH_CTRL_REG4, input);
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
 }
 
 void LIS3DSH::set_range_and_aa()
@@ -506,7 +429,11 @@ void LIS3DSH::configure_fifo()
 
     // Enable/disable fifo - CTRL_REG_6
     uint8_t register_value = 0;
+<<<<<<< HEAD
     bitSet(register_value, 4); // Enabled ADD_INC - automatic address increment during burst read_from
+=======
+    bitSet(register_value, 4); // Enabled ADD_INC - automatic address increment during burst read
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
     bitWrite(register_value, 6, settings.fifo_enabled);
     bitWrite(register_value, 2, settings.fifo_watermark_interrupt_enabled);
     write(register_value, LIS3DSH_CTRL_REG6);
@@ -626,7 +553,11 @@ void LIS3DSH::configure_state_machine(uint8_t sm_number)
 int8_t LIS3DSH::read_temperature()
 {
     uint8_t temperature;
+<<<<<<< HEAD
     read_from(&temperature, LIS3DSH_OUT_T);
+=======
+    read(&temperature, LIS3DSH_OUT_T);
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
     temperature += 25;
     return temperature;
 }
@@ -641,12 +572,20 @@ float LIS3DSH::calculate_acceleration_from_raw(int16_t input)
 
 /**
  * Read in the contents of the FIFO buffer.
+<<<<<<< HEAD
  * A maximum of 32 measurements can be read_from in at once.
+=======
+ * A maximum of 32 measurements can be read in at once.
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
  * Oldest measurements are collected first.
  * Ensure the specified output buffer has enough space to fit the entire buffer (max. 192 bytes).
  *
  * @param output_buffer: Output buffer to store the collected data.
+<<<<<<< HEAD
  * @return: The number of measurements read_from from the FIFO buffer.
+=======
+ * @return: The number of measurements read from the FIFO buffer.
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
  */
 uint8_t LIS3DSH::read_fifo_buffer(uint8_t *output_buffer)
 {
@@ -667,17 +606,28 @@ uint8_t LIS3DSH::read_fifo_buffer(AccelerometerEntry *buffer)
 
     for (size_t i = 0; i < num_entries; i++)
     {
+<<<<<<< HEAD
         buffer[i].x = data[i * 6] + (data[i * 6 + 1] << 8);
         buffer[i].y = data[i * 6 + 2] + (data[i * 6 + 3] << 8);
         buffer[i].z = data[i * 6 + 4] + (data[i * 6 + 5] << 8);
     }
     return num_entries;
+=======
+        buffer[i].x = uint16_t(data[i * 6]) | (data[i * 6 + 1] << 8);
+        buffer[i].y = uint16_t(data[i * 6 + 2]) | (data[i * 6 + 3] << 8);
+        buffer[i].z = uint16_t(data[i * 6 + 4]) | (data[i * 6 + 5] << 8);
+    }
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
 }
 
 uint8_t LIS3DSH::get_fifo_count()
 {
     uint8_t fifo_state;
+<<<<<<< HEAD
     read_from(&fifo_state, LIS3DSH_FIFO_SRC);
+=======
+    read(&fifo_state, LIS3DSH_FIFO_SRC);
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
     uint8_t entries_in_fifo = (fifo_state & 0b11111);
     return entries_in_fifo;
 }
@@ -685,7 +635,11 @@ uint8_t LIS3DSH::get_fifo_count()
 uint8_t LIS3DSH::has_fifo_overrun()
 {
     uint8_t fifo_state;
+<<<<<<< HEAD
     read_from(&fifo_state, LIS3DSH_FIFO_SRC);
+=======
+    read(&fifo_state, LIS3DSH_FIFO_SRC);
+>>>>>>> 7201b4dd4db144c675d3f7e0efac6ddee8c1147d
     return bitRead(fifo_state, 6);
 }
 

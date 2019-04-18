@@ -153,7 +153,7 @@ public:
 
     // Comms
     status_t read_from(uint8_t *output, uint8_t address, uint8_t length = 1);
-    status_t write_to(uint8_t input, uint8_t address, uint8_t length = 1);
+    status_t write_to(uint8_t *input, uint8_t address, uint8_t length = 1);
     status_t write_bit(uint8_t input, uint8_t address, uint8_t bit);
     status_t comms_check();
 
@@ -181,10 +181,10 @@ public:
 private:
     status_t begin_comms();
     status_t i2c_read(uint8_t *output, uint8_t address, uint8_t length = 1);
-    status_t i2c_write(uint8_t input, uint8_t address, uint8_t length = 1);
+    status_t i2c_write(uint8_t *input, uint8_t address, uint8_t length = 1);
 
     status_t spi_read(uint8_t *output, uint8_t address, uint8_t length = 1);
-    status_t spi_write(uint8_t input, uint8_t address, uint8_t length = 1);
+    status_t spi_write(uint8_t *input, uint8_t address, uint8_t length = 1);
 
     void set_sample_rate();
     void set_range_and_aa();
