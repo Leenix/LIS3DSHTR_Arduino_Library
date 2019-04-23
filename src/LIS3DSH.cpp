@@ -739,13 +739,13 @@ void LIS3DSH::configure_auto_sleep() {
 
     StateMachineSettings sleep_settings;
 
-    sleep_settings.decimator = 0;
-    sleep_settings.threshold_1 = 5;  // Wake threshold
-    sleep_settings.threshold_2 = 1;  // Sleep threshold
+    sleep_settings.decimator = 4;
+    sleep_settings.threshold_1 = settings.wake_threshold;
+    sleep_settings.threshold_2 = settings.sleep_threshold;
     sleep_settings.thresholds_are_absolute = true;
     sleep_settings.diff_calculation_enabled = true;
-    sleep_settings.stop_and_cont_interrupts = true;
-    sleep_settings.interrupt_output = LIS3DSH_SM_INTERRUPT_OUTPUT::INT1;
+    sleep_settings.stop_and_cont_interrupts = settings.interrupt_on_inactivity;
+    sleep_settings.interrupt_output = settings.activity_interrupt_pin;
 
     sleep_settings.mask_a = 0b11111100;
     sleep_settings.mask_b = 0b11111100;
@@ -764,9 +764,8 @@ void LIS3DSH::configure_auto_sleep() {
 
     // Active state
     sleep_settings.code[1] = LIS3DSH_COMMAND_OUTC;  // Trigger interrupt to prompt MCU to enable FIFO
-    sleep_settings.code[2] = (LIS3DSH_OP_NOP << 4) | LIS3DSH_OP_LLTH2;  // Reset while activity continues
-
-    sleep_settings.code[3] = LIS3DSH_COMMAND_CONT;
+    sleep_settings.code[2] = (LIS3DSH_OP_NOP << 4) | LIS3DSH_OP_LLTH2;  // Hold while activity continues on any axis
+    sleep_settings.code[3] = LIS3DSH_COMMAND_CONT;                      // Activity dropped below threshold; reset
 
     sm_settings[SM2] = sleep_settings;
     apply_state_machine_settings();

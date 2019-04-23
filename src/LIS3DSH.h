@@ -102,6 +102,11 @@ struct SensorSettings {
 
     uint8_t state_machine_1_enabled = false;
     uint8_t state_machine_2_enabled = false;
+
+    uint8_t wake_threshold = 6;
+    uint8_t sleep_threshold = 1;
+    uint8_t activity_interrupt_pin = INT1;
+    uint8_t interrupt_on_inactivity = true;
 };
 
 struct StateMachineSettings {
