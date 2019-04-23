@@ -65,6 +65,11 @@ enum LIS3DSH_INTERRUPT_MODE {
     PULSED = 1,
 };
 
+enum LIS3DSH_SM_INTERRUPT_OUTPUT {
+    INT1 = 0,
+    INT2 = 1,
+};
+
 enum STATE_MACHINES {
     SM1 = 0,
     SM2 = 1,
@@ -155,6 +160,9 @@ class LIS3DSH {
     void read_accelerometers(AccelerometerEntry *entry);
 
     // FIFO
+    void restore_fifo();
+    void disable_fifo();
+    uint8_t is_fifo_active();
     uint8_t read_fifo_buffer(uint8_t *buffer);
     uint8_t read_fifo_buffer(AccelerometerEntry *buffer);
     uint8_t get_fifo_count();
@@ -167,6 +175,7 @@ class LIS3DSH {
     void write_state_machine_status(uint8_t sm_number, uint8_t active_status);
     void configure_auto_sleep();
     uint8_t get_state(uint8_t sm_number);
+    uint8_t read_state_machine_output(uint8_t sm_number);
 
     // Settings
     SensorSettings settings;
@@ -190,8 +199,7 @@ class LIS3DSH {
     uint8_t comm_type;
     uint8_t i2c_address;
     uint8_t chip_select_pin;
-    uint8_t state_machine_1_configured = false;
-    uint8_t state_machine_2_configured = false;
+    uint8_t _is_fifo_active;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

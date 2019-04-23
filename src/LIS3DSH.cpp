@@ -274,10 +274,10 @@ status_t LIS3DSH::write_bit(uint8_t input, uint8_t address, uint8_t bit) {
     uint8_t current_state;
 
     // Ensure input is a 1-bit flag
-    input &= 0x1;
+    input &= 0x01;
 
     comm_result = read_from(&current_state, address);
-    current_state |= (input << bit);
+    bitWrite(current_state, bit, input);
     comm_result = write_to(&current_state, address);
 
     return comm_result;
@@ -404,6 +404,7 @@ void LIS3DSH::configure_fifo() {
     uint8_t register_value = 0;
     bitSet(register_value, 4);  // Enabled ADD_INC - automatic address increment during burst read_from
     bitWrite(register_value, 6, settings.fifo_enabled);
+    _is_fifo_active = settings.fifo_enabled;
     bitWrite(register_value, 2, settings.fifo_watermark_interrupt_enabled);
     write_to(&register_value, LIS3DSH_CTRL_REG6);
 
@@ -443,12 +444,10 @@ void LIS3DSH::configure_interrupts() {
 void LIS3DSH::apply_state_machine_settings() {
     if (settings.state_machine_1_enabled) {
         configure_state_machine(SM1);
-        state_machine_1_configured = true;
     }
 
     if (settings.state_machine_2_enabled) {
         configure_state_machine(SM2);
-        state_machine_2_configured = true;
     }
 }
 
@@ -472,11 +471,7 @@ void LIS3DSH::configure_state_machine(uint8_t sm_number) {
     // SM code registers
     for (size_t i = 0; i < 16; i++) {
         uint8_t code = sm_settings[sm_number].code[i];
-        if (code != 0x00) {
-            set_state_machine_instruction(sm_number, i + 1, code);
-        } else {
-            break;
-        }
+        set_state_machine_instruction(sm_number, i + 1, code);
     }
 
     // Thresholds
@@ -486,7 +481,7 @@ void LIS3DSH::configure_state_machine(uint8_t sm_number) {
     // Timers
     uint8_t timer[2] = {lowByte(sm_settings[sm_number].timer1_initial_value),
                         highByte(sm_settings[sm_number].timer1_initial_value)};
-    write_to((uint8_t *)&sm_settings[sm_number].timer1_initial_value, LIS3DSH_REG_TIM1_1 + offset, 2);
+    write_to(timer, LIS3DSH_REG_TIM1_1 + offset, 2);
 
     timer[0] = lowByte(sm_settings[sm_number].timer2_initial_value);
     timer[1] = highByte(sm_settings[sm_number].timer2_initial_value);
@@ -601,6 +596,21 @@ void LIS3DSH::read_accelerometers(AccelerometerEntry *entry) {
 ///////////////////////////////////////////////////////////////////////////////
 // FIFO
 
+void LIS3DSH::restore_fifo() { configure_fifo(); }
+
+void LIS3DSH::disable_fifo() {
+    write_bit(0, LIS3DSH_CTRL_REG6, 6);  // Disable FIFO
+    byte zero = 0;
+    write_to(&zero, LIS3DSH_REG_FIFO_CTRL);
+    _is_fifo_active = false;
+}
+
+/**
+ * Check if the fifo has been enabled or disabled.
+ * @return: Fifo active state. true=active
+ */
+uint8_t LIS3DSH::is_fifo_active() { return _is_fifo_active; }
+
 /**
  * Read in the contents of the FIFO buffer.
  * A maximum of 32 measurements can be read in at once.
@@ -712,9 +722,8 @@ void LIS3DSH::set_state_machine_instruction(uint8_t sm_number, uint8_t code_regi
  */
 void LIS3DSH::write_state_machine_status(uint8_t sm_number, uint8_t active_status) {
     uint8_t register_address = LIS3DSH_CTRL_REG1;
-    if (sm_number == SM2) {
-        register_address = LIS3DSH_CTRL_REG2;
-    }
+    if (sm_number == SM2) register_address = LIS3DSH_CTRL_REG2;
+
     write_bit(active_status, register_address, 0);
 }
 
@@ -732,48 +741,32 @@ void LIS3DSH::configure_auto_sleep() {
 
     sleep_settings.decimator = 0;
     sleep_settings.threshold_1 = 5;  // Wake threshold
-    sleep_settings.threshold_2 = 2;  // Sleep threshold
+    sleep_settings.threshold_2 = 1;  // Sleep threshold
     sleep_settings.thresholds_are_absolute = true;
     sleep_settings.diff_calculation_enabled = true;
     sleep_settings.stop_and_cont_interrupts = true;
-    sleep_settings.interrupt_output = true;
+    sleep_settings.interrupt_output = LIS3DSH_SM_INTERRUPT_OUTPUT::INT1;
 
-    sleep_settings.timer2_initial_value = 2 * settings.sample_rate;
     sleep_settings.mask_a = 0b11111100;
     sleep_settings.mask_b = 0b11111100;
 
     /**
-     * The auto-sleep routine is comprised of 3 main states: inactive, active, and pre-sleep.
-     * The device starts off in an inactive state.
-     * Data is not pushed to FIFO in this state if the Bypass-to-FIFO or Bypass-to-Stream modes are used.
-     *
      * [Inactive]   - Wait for the activity to go above the wake threshold (TH1)
      *              - Activity moves the routine into the active state.
      *
      * [Active]     - Start recording measurements to FIFO (if in a triggered mode)
      *              - Loop back to 2 while activity stays above the inactive threshold (TH2)
      *              - If activity drops below the inactive threshold, the device moves to the pre-sleep stage
-     *
-     * [Pre-sleep]  - Data continues to be recorded to the FIFO in this state
-     *              - A minimum number of samples are recorded after entering pre-sleep before the device returns to the
-     *                   inactive state.
-     *              - If activity has restarted, then the active state will be triggered once more.
      */
 
     // Inactive state
     sleep_settings.code[0] = (LIS3DSH_OP_NOP << 4) | LIS3DSH_OP_GNTH1;  // Wait until wake threshold triggered
 
     // Active state
-    sleep_settings.code[1] = LIS3DSH_COMMAND_SRP;   // Set the new reset loop point to make an active loop
-    sleep_settings.code[2] = LIS3DSH_COMMAND_OUTC;  // Set INT2 high for FIFO purposes
+    sleep_settings.code[1] = LIS3DSH_COMMAND_OUTC;  // Trigger interrupt to prompt MCU to enable FIFO
+    sleep_settings.code[2] = (LIS3DSH_OP_NOP << 4) | LIS3DSH_OP_LLTH2;  // Reset while activity continues
 
-    sleep_settings.code[3] = (LIS3DSH_OP_GNTH2 << 4) | LIS3DSH_OP_LNTH2;  // Reset while activity continues
-
-    // Pre-sleep state
-    sleep_settings.code[4] = LIS3DSH_COMMAND_CRP;  // Remove the reset loop
-
-    // INT2 stays high when the final state is reached, so FIFO will continue to record
-    sleep_settings.code[5] = LIS3DSH_OP_TI2 << 4 | LIS3DSH_OP_NOP;  // Reset once timer reaches minimum reads
+    sleep_settings.code[3] = LIS3DSH_COMMAND_CONT;
 
     sm_settings[SM2] = sleep_settings;
     apply_state_machine_settings();
@@ -790,4 +783,13 @@ uint8_t LIS3DSH::get_state(uint8_t sm_number) {
 
     read_from(&state, register_address);
     return (state & 0x0F);
+}
+
+uint8_t LIS3DSH::read_state_machine_output(uint8_t sm_number) {
+    uint8_t address = LIS3DSH_REG_OUTS1;
+    if (sm_number == SM2) address = LIS3DSH_REG_OUTS2;
+
+    uint8_t output;
+    read_from(&output, address);
+    return output;
 }
